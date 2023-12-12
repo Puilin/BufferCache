@@ -1,9 +1,14 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "buffercache.h"
 #include <pthread.h>
+
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 BufferCache *buffer_init() {
     BufferCache *bc = (BufferCache*)malloc(sizeof(BufferCache));;
@@ -57,7 +62,15 @@ int buffered_read(BufferCache *buffercache, int block_nr, char *result) {
 
 // 스레드가 실행할 함수
 void *direct_io(void *ptr) {
-    
+    int disk_fd = open("diskfile", O_RDWR|O_DIRECT);
+
+    Args *args = (Args *)ptr;
+    int block_nr = args->victim_block_nr;
+    char *data = args->data;
+    if (lseek(disk_fd, block_nr * BLOCK_SIZE, SEEK_SET) < 0)
+        perror("disk is not mounted");
+    if (write(disk_fd, data, BLOCK_SIZE) < 0)
+        perror("write");
 }
 
 /* mode (버퍼캐시가 꽉 찼을때 한정) :: victim 선정 알고리즘
@@ -66,9 +79,14 @@ void *direct_io(void *ptr) {
 2 : LFU */
 int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode) {
 
+    pthread_t thread;
+
     if (block_nr < 0 || block_nr > DISK_BLOCKS-1) {
         return -1;
     }
+
+    // Lock
+    pthread_mutex_lock(&lock);
     
     char *data = (char *)malloc(BLOCK_SIZE);
     int victim_block_nr;
@@ -89,6 +107,11 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
                 return -1;
         }
         // 스레드 생성 -> direct_io
+        Args *a = (Args *)malloc(sizeof(Args));
+        a->victim_block_nr = victim_block_nr;
+        strcpy(a->data, data);
+        int tid = pthread_create(&thread, NULL, direct_io, (void *)a);
+        pthread_join(thread, NULL);
         //return -1;
     }
 
@@ -116,7 +139,10 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
     }
     buffercache->items++;
     enqueue(buffercache->cachequeue, block_nr); // block_nr를 큐에 집어넣음
-    
+
+    // unlock
+    pthread_mutex_unlock(&lock);
+
     return 0;
 }
 
@@ -165,6 +191,9 @@ int main() {
         delayed_write(bc, i, testbank[i], 0);
     }
 
+    // direct_IO
+    char *test_buf = (char *)malloc(BLOCK_SIZE);
+
     int ret = buffered_read(bc, 9, output);
 
     printf("[READ] block_num 9 : %s\n", output); // Gold
@@ -172,6 +201,16 @@ int main() {
     ret = delayed_write(bc, 11, "White", 0);
 
     ret = buffered_read(bc, 11, output);
+
+    int disk_fd = open("diskfile", O_RDWR|O_DIRECT);
+    if (lseek(disk_fd, 0 * BLOCK_SIZE, SEEK_SET) < 0)
+        perror("lseek");
+    if (read(disk_fd, test_buf, BLOCK_SIZE) < 0)
+        perror("read");
+    printf("[DIRECT I/O block_num 0 (after FIFO) : %s\n", test_buf);
+
+    if (read(disk_fd, test_buf, BLOCK_SIZE) < 0)
+        perror("read");
 
     printf("[READ] block_num 11 : %s\n", output);
 

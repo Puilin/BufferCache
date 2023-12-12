@@ -27,6 +27,11 @@ typedef struct buffercache {
     // Stack *cachstack; // LRU에서 사용됨
 } BufferCache;
 
+typedef struct thread_args {
+    int victim_block_nr;
+    char data[BLOCK_SIZE];
+} Args;
+
 BufferCache *buffer_init();
 void buffer_free(BufferCache *bc);
 int hash(int input);
