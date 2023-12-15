@@ -1,10 +1,11 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "buffercache.h"
-#include <pthread.h>
-#include  <sys/time.h>
 #include <pthread.h>
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -61,6 +62,20 @@ int buffered_read(BufferCache *buffercache, int block_nr, char *result) {
         if (current->blk->block_nr == block_nr) {
             memcpy(result, current->blk->data, BLOCK_SIZE);
             current->blk->ref_count++;
+
+            // 찾은 블록의 번호를 스택에서 삭제
+            for (int i = 0; i < CACHE_SIZE; i++) {
+                if (buffercache->cachstack->items[i] == block_nr) {
+                    for (int j = i; j < CACHE_SIZE - 1; j++) {
+                        buffercache->cachstack->items[j] = buffercache->cachstack->items[j + 1];
+                    }
+                    break;
+                }
+            }
+
+            // 스택의 맨 위로 push
+            push(buffercache->cachstack, block_nr);
+
             gettimeofday(&end_time, NULL);
             elapsed_time = (end_time.tv_sec - start_time.tv_sec) * 1000000L +
             (end_time.tv_usec - start_time.tv_usec);
@@ -117,13 +132,11 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
               victim_block_nr = lru(buffercache, data);
                 printf("victim : %s\n", data);
                 break;
-                //lru();
                 break;
             case 2:
                 victim_block_nr = lfu(buffercache, data);
                 printf("victim : %s\n", data);
                 break;
-                //lfu();
                 break;
             default:
                 return -1;
@@ -220,7 +233,6 @@ int lru(BufferCache *buffercache, char *placeholder) {
             current = current->next;
         }
     }
-
     printf("[LRU] block_num %d will be deleted\n", oldest_block_nr);
 
     // 찾은 오래된 블록을 삭제하고, 데이터를 placeholder에 복사
@@ -243,10 +255,16 @@ int lru(BufferCache *buffercache, char *placeholder) {
                 buffercache->items--;
 
                 dequeue(buffercache->cachequeue);
-                // 스택에서도 제거
+                 // 스택에서도 제거하고 가장 위로 올림
                 for (int i = 0; i < CACHE_SIZE - 1; i++) {
                     buffercache->cachstack->items[i] = buffercache->cachstack->items[i + 1];
                 }
+                buffercache->cachstack->top--;
+                // buffercache->cachstack->items[CACHE_SIZE - 1] = oldest_block_nr;
+                // 스택에서도 제거
+                // for (int i = 0; i < CACHE_SIZE - 1; i++) {
+                //     buffercache->cachstack->items[i] = buffercache->cachstack->items[i + 1];
+                // }
                 buffercache->cachstack->top--;
 
                 return oldest_block_nr;
@@ -260,10 +278,9 @@ int lru(BufferCache *buffercache, char *placeholder) {
     return -1;
 }
 
-
 int lfu(BufferCache *buffercache, char *placeholder) {
-    int min_ref_count = 10000; 
-    int victim_block_nr = -1; 
+    int min_ref_count = 10000;
+    int victim_block_nr = -1;
 
     for (int i = 0; i < CACHE_SIZE; i++) {
         Node *current = buffercache->array[i];
@@ -275,11 +292,14 @@ int lfu(BufferCache *buffercache, char *placeholder) {
             current = current->next;
         }
     }
+
+    // Check if victim found
     if (victim_block_nr != -1) {
         int index = hash(victim_block_nr);
         Node *current = buffercache->array[index];
         Node *prev = NULL;
 
+        // Remove victim block from array
         while (current != NULL) {
             if (current->blk->block_nr == victim_block_nr) {
                 if (prev == NULL) {
@@ -287,12 +307,17 @@ int lfu(BufferCache *buffercache, char *placeholder) {
                 } else {
                     prev->next = current->next;
                 }
-
+                current->blk->ref_count = 0;
                 strcpy(placeholder, current->blk->data);
                 free(current->blk);
                 free(current);
                 buffercache->items--;
-                return victim_block_nr;
+
+                // queue, stack, ref_count 초기화 
+                pop(buffercache->cachstack);
+                dequeue(buffercache->cachequeue);
+
+                return victim_block_nr; // Return victim block number
             }
 
             prev = current;
@@ -300,7 +325,6 @@ int lfu(BufferCache *buffercache, char *placeholder) {
         }
     }
 
-    // 찾지 못한 경우
     perror("Entry Not found");
     return -1;
 }
@@ -323,9 +347,19 @@ int main() {
 
     printf("[READ] block_num 9 : %s\n", output); // Gold
 
-    ret = delayed_write(bc, 11, "White", 0);
+    ret = delayed_write(bc, 11, "White", 1);
 
     ret = buffered_read(bc, 11, output);
+
+    int disk_fd = open("diskfile", O_RDWR|O_DIRECT);
+    if (lseek(disk_fd, 0 * BLOCK_SIZE, SEEK_SET) < 0)
+        perror("lseek");
+    if (read(disk_fd, test_buf, BLOCK_SIZE) < 0)
+        perror("read");
+    printf("[DIRECT I/O block_num 0 (after FIFO) : %s\n", test_buf);
+
+    if (read(disk_fd, test_buf, BLOCK_SIZE) < 0)
+        perror("read");
 
     printf("[READ] block_num 11 : %s\n", output);
 
