@@ -2,6 +2,7 @@
 #define BUFFERCACHE_H
 
 #include "queue.h"
+#include "stack.h"
 #include <time.h>
 
 #define DISK_BLOCKS 100 // also known as N
@@ -15,6 +16,7 @@ struct block {
     int ref_count; // 참조횟수
 };
 
+
 typedef struct node {
     struct block *blk;
     struct node *next;
@@ -24,13 +26,14 @@ typedef struct buffercache {
     Node *array[CACHE_SIZE];
     int items; // node의 개수 총합
     Queue *cachequeue; // FIFO에서 사용됨
-    // Stack *cachstack; // LRU에서 사용됨
+    Stack *cachstack; // LRU에서 사용됨
 } BufferCache;
 
 typedef struct thread_args {
     int victim_block_nr;
     char data[BLOCK_SIZE];
 } Args;
+
 
 BufferCache *buffer_init();
 void buffer_free(BufferCache *bc);
@@ -39,5 +42,7 @@ int buffered_read(BufferCache *buffercache, int block_nr, char *result);
 void *direct_io(void *ptr);
 int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode);
 int fifo(BufferCache *bc, char *data);
+int lru(BufferCache* bc, char* data);
+int lfu(BufferCache* bc, char* data);
 
 #endif

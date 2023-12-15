@@ -79,23 +79,23 @@ int init()
 		return disk_fd;
 }
 
-int main (int argc, char *argv[])
-{
-	char *buffer;
-	int ret;
+// int main (int argc, char *argv[])
+// {
+// 	char *buffer;
+// 	int ret;
 
-	init();
+// 	init();
 
-	buffer = malloc(BLOCK_SIZE);
+// 	buffer = malloc(BLOCK_SIZE);
 	
-    ret = lib_read(0, buffer);
+//     ret = lib_read(0, buffer);
 	
-	printf("nread: %d\n", ret);
+// 	printf("nread: %d\n", ret);
 
-    ret = lib_write(0, buffer);
-	printf("nwrite: %d\n", ret);
+//     ret = lib_write(0, buffer);
+// 	printf("nwrite: %d\n", ret);
 
-	free(buffer);
+// 	free(buffer);
 
-    return 0;
-}
+//     return 0;
+// }
