@@ -2,11 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include "buffercache.h"
 #include <pthread.h>
+#include <sys/time.h>
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -343,9 +343,9 @@ int main() {
     // direct_IO
     char *test_buf = (char *)malloc(BLOCK_SIZE);
 
-    int ret = buffered_read(bc, 9, output);
+    int ret = buffered_read(bc, 0, output);
 
-    printf("[READ] block_num 9 : %s\n", output); // Gold
+    printf("[READ] block_num 0 : %s\n", output); // What color is grass?
 
     ret = delayed_write(bc, 11, "White", 1);
 
