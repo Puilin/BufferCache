@@ -34,12 +34,12 @@ typedef struct thread_args {
     char data[BLOCK_SIZE];
 } Args;
 
-
 BufferCache *buffer_init();
 void buffer_free(BufferCache *bc);
 int hash(int input);
 int buffered_read(BufferCache *buffercache, int block_nr, char *result);
 void *direct_io(void *ptr);
+void *flush(void *ptr);
 int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode);
 int fifo(BufferCache *bc, char *data);
 int lru(BufferCache* bc, char* data);

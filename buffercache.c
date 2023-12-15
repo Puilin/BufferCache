@@ -93,6 +93,7 @@ int buffered_read(BufferCache *buffercache, int block_nr, char *result) {
 
 // 스레드가 실행할 함수
 void *direct_io(void *ptr) {
+    pthread_mutex_lock(&lock); // lock
     int disk_fd = open("diskfile", O_RDWR|O_DIRECT);
 
     Args *args = (Args *)ptr;
@@ -101,7 +102,36 @@ void *direct_io(void *ptr) {
     if (lseek(disk_fd, block_nr * BLOCK_SIZE, SEEK_SET) < 0)
         perror("disk is not mounted");
     if (write(disk_fd, data, BLOCK_SIZE) < 0)
-        perror("write");
+        perror("write - direct_io");
+    close(disk_fd);
+    pthread_mutex_unlock(&lock); // unlock
+}
+
+// function for flush thread (every 15 secs)
+void *flush(void *ptr) {
+    BufferCache *bc = (BufferCache *) ptr;
+
+    while (1) {
+        printf("flushing...\n");
+        for (int i=0; i< CACHE_SIZE; i++) {
+            Node *current = bc->array[i];
+            while (current != NULL) {
+                if (current->blk->dirty_bit == 1) {
+                    pthread_mutex_lock(&lock); // lock
+                    int block_nr = current->blk->block_nr;
+                    char *data = current->blk->data;
+                    int disk_fd = open("diskfile", O_RDWR|O_DIRECT);
+                    if (lseek(disk_fd, block_nr * BLOCK_SIZE, SEEK_SET) < 0)
+                        perror("disk is not mounted");
+                    if (write(disk_fd, data, BLOCK_SIZE) < 0)
+                        perror("write - flush");
+                    pthread_mutex_unlock(&lock); // unlock
+                }
+                current = current->next;
+            }
+        }
+        sleep(15);
+    }
 }
 
 /* mode (버퍼캐시가 꽉 찼을때 한정) :: victim 선정 알고리즘
@@ -116,13 +146,10 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
 
     pthread_t thread;
 
-    // Lock
-    pthread_mutex_lock(&lock);
-
-    char *data = (char *)malloc(BLOCK_SIZE);
     int victim_block_nr;
     // 버퍼캐시가 꽉참 -> victim 선정
     if (buffercache->items == CACHE_SIZE) {
+        char *data = (char *)malloc(BLOCK_SIZE);
         switch (mode) {
             case 0:
                 victim_block_nr = fifo(buffercache, data);
@@ -147,6 +174,7 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
         strcpy(a->data, data);
         int tid = pthread_create(&thread, NULL, direct_io, (void *)a);
         pthread_join(thread, NULL);
+        free(data);
         //return -1;
     }
 
@@ -176,7 +204,6 @@ int delayed_write(BufferCache *buffercache, int block_nr, char *input, int mode)
     enqueue(buffercache->cachequeue, block_nr); // block_nr를 큐에 집어넣음
     push(buffercache->cachstack,block_nr); // block_nr을 스택에 집엉넣음
 
-    pthread_mutex_unlock(&lock);
     return 0;
 }
 
@@ -339,6 +366,11 @@ int main() {
     for (int i=0; i<10; i++) {
         delayed_write(bc, i, testbank[i], 0);
     }
+
+    pthread_t flush_thread;
+
+    int tid = pthread_create(&flush_thread, NULL, flush, (void *)bc);
+    pthread_detach(flush_thread);
 
     // direct_IO
     char *test_buf = (char *)malloc(BLOCK_SIZE);
